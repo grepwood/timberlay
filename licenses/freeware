@@ -1,0 +1,19 @@
+This is a placeholder license for files that are assumed to be freeware.
+
+It is not a license in of itself, but rather a safe assumption of what is permissible in such an ambiguous and risky situation.
+
+An attempt was made to find the original license, but it could not be found.
+
+Thus, this file grants the following safe assumptions:
+
+- The subject of this file was at some point in time freely available for download for gratis, when it was published by its original publisher.
+
+- By doing so, the publisher gave implicit permission to redistribute and mirror the original file, as is, without modification.
+
+- Without stating the terms in a license text, we assume it is forbidden to redistribute derivative works based on the original file.
+
+- The ebuild file is a program that references the original file and is therefore not a derivative work.
+
+- The ebuild however does create a derivative work. This derivative work is the natural product of consuming the subject of this file, but it may not be redistributed without explicit permission of the original publisher, which was not found.
+
+As such, this is a good placeholder license to use for freeware files.

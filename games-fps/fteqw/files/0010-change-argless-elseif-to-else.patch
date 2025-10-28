@@ -1,0 +1,11 @@
+--- a/CMakeLists.txt	2025-10-27 20:34:33.397309414 +0100
++++ b/CMakeLists.txt	2025-10-27 20:37:32.479308805 +0100
+@@ -245,7 +245,7 @@
+ 		INCLUDE_DIRECTORIES( ${Fontconfig_INCLUDE_DIRS} )
+ 		SET(FTE_LIB_DEFINES ${FTE_LIB_DEFINES};LIBFONTCONFIG_STATIC)
+ 		SET(FTE_LIBS ${FTE_LIBS} ${Fontconfig_LIBRARIES})
+-	ELSEIF()
++	ELSE()
+ 		MESSAGE(WARNING "fontconfig library NOT available. I hope you're not using any system fonts.")
+ 	ENDIF()
+ ELSE()

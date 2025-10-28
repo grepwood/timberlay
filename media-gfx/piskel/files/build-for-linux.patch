@@ -1,0 +1,31 @@
+diff --git a/Gruntfile.js b/Gruntfile.js
+index 9eb37da..2f4e6af 100644
+--- a/Gruntfile.js
++++ b/Gruntfile.js
+@@ -273,6 +273,18 @@ module.exports = function (grunt) {
+      */
+ 
+     nwjs: {
++      linux: {
++        options: {
++          version: "0.102.0",
++          build_dir: './dest/desktop/',
++          platform: 'linux',
++          arch: 'x64',
++          appVersion: '0.15.0',
++          flavor: "normal",
++          manifestUrl: "https://nwjs.io/versions.json",
++        },
++        src: ['./dest/prod/**/*', "./package.json", "!./dest/desktop/"]
++      },
+       windows: {
+         options: {
+           downloadUrl: 'https://dl.nwjs.io/',
+@@ -322,6 +334,7 @@ module.exports = function (grunt) {
+   grunt.registerTask('build', ['clean:prod', 'sprite', 'merge-statics', 'build-index.html', 'build-partials', 'replace:css', 'copy:prod']);
+   grunt.registerTask('build-dev', ['clean:dev', 'sprite', 'build-index.html', 'copy:dev']);
+   grunt.registerTask('desktop', ['clean:desktop', 'default', 'nwjs:windows']);
++  grunt.registerTask('desktop-linux', ['clean:desktop', 'default', 'nwjs:linux']);
+   grunt.registerTask('desktop-mac', ['clean:desktop', 'default', 'nwjs:macos']);
+   grunt.registerTask('desktop-mac-old', ['clean:desktop', 'default', 'replace:desktop', 'nwjs:macos_old']);
+ 
