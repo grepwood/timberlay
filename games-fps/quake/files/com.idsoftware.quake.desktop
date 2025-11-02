@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Quake (FTEQW)
+Comment=Quake on FTEQW, a cross-platform port of the Quake game engine
+Exec=fteqw -game quake -basedir /usr/share/quake +plug_load ffmpeg
+Icon=org.fteqw.fteqw
+Terminal=false
+Categories=Game;
+MimeType=application/x-quakeworlddemo;x-scheme-handler/quake;x-scheme-handler/qw;

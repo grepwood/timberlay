@@ -87,6 +87,6 @@ src_unpack() {
 }
 
 src_install() {
-	insinto /usr/share/quake1
+	insinto /usr/share/quake
 	doins -r id1
 }

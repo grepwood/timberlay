@@ -1,0 +1,14 @@
+bullet - Adds physics from sci-physics/bullet
+cod - Adds support for Call of Duty 1 assets
+ezhud - Adds EZQuake HUD
+ffmpeg - Adds support for more media types
+hl2 - Adds support for Half-Life 2 assets
+irc - Adds an IRC client
+models - Adds models format plugin, but it's slightly redundant due to gltf2 support
+mpq - Adds support for Mo'PaQ archives used by Blizzard games
+ode - Adds rigid body physics from dev-games/ode
+openssl - Adds OpenSSL support
+qi - Adds a QuakeC interpreter plugin
+quake3 - Adds support for Quake 3 assets
+terraingen - Adds a terrain generation plugin
+xmpp - Adds a Jabber/XMPP client
