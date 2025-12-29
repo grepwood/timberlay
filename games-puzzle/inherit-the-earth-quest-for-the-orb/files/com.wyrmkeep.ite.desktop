@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Inherit the Earth: Quest for the Orb
+Comment=A new breed of adventure!
+Exec=scummvm --config=/usr/share/inherit-the-earth-quest-for-the-orb/ite.ini ite-cd
+Icon=com.wyrmkeep.ite
+Terminal=false
+Categories=Game;
