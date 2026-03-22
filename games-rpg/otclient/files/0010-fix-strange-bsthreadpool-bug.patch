@@ -1,0 +1,9 @@
+--- a/src/framework/core/asyncdispatcher.cpp	2026-01-13 20:40:44.000000000 +0100
++++ b/src/framework/core/asyncdispatcher.cpp	2026-03-19 22:26:42.347183516 +0100
+@@ -38,4 +38,4 @@
+     return std::clamp<int_fast8_t>(std::thread::hardware_concurrency() - 1, MIN_THREADS, MAX_THREADS);
+ }
+ 
+-BS::thread_pool g_asyncDispatcher{ getThreadCount() };
+\ Brak znaku nowej linii na końcu pliku
++BS::thread_pool<0> g_asyncDispatcher{ getThreadCount() };

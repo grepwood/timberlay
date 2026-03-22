@@ -1,0 +1,539 @@
+--- a/src/framework/net/connection.cpp	2026-01-13 20:40:44.000000000 +0100
++++ b/src/framework/net/connection.cpp	2026-03-19 22:25:05.946180762 +0100
+@@ -26,15 +26,15 @@
+ #include "framework/util/stats.h"
+ #include "framework/core/graphicalapplication.h"
+ 
+-asio::io_service g_ioService;
++asio::io_context g_ioContext;
+ std::list<std::shared_ptr<asio::streambuf>> Connection::m_outputStreams;
+ 
+ Connection::Connection() :
+-    m_readTimer(g_ioService),
+-    m_writeTimer(g_ioService),
+-    m_delayedWriteTimer(g_ioService),
+-    m_resolver(g_ioService),
+-    m_socket(g_ioService)
++    m_readTimer(g_ioContext),
++    m_writeTimer(g_ioContext),
++    m_delayedWriteTimer(g_ioContext),
++    m_resolver(g_ioContext),
++    m_socket(g_ioContext)
+ {
+ }
+ 
+@@ -50,13 +50,13 @@
+ {
+ 	// reset must always be called prior to poll
+ 	AutoStat s(STATS_MAIN, "PollConnection");
+-    g_ioService.reset();
+-    g_ioService.poll();
++	g_ioContext.restart();
++	g_ioContext.poll();
+ }
+ 
+ void Connection::terminate()
+ {
+-    g_ioService.stop();
++    g_ioContext.stop();
+     m_outputStreams.clear();
+ }
+ 
+@@ -94,10 +94,16 @@
+     m_error.clear();
+     m_connectCallback = connectCallback;
+ 
+-    const asio::ip::tcp::resolver::query query(host.data(), stdext::unsafe_cast<std::string>(port));
+-    m_resolver.async_resolve(query, [this](auto&& error, auto&& endpointIterator) {
+-        onResolve(std::move(error), std::move(endpointIterator));
+-    });
++    m_resolver.async_resolve(
++        std::string(host),
++        stdext::unsafe_cast<std::string>(port),
++        [this](
++            auto&& error,
++            auto&& endpointIterator
++        ) {
++            onResolve(std::move(error), std::move(endpointIterator));
++        }
++    );
+ 
+     m_readTimer.cancel();
+     m_readTimer.expires_after(std::chrono::seconds(static_cast<uint32_t>(READ_TIMEOUT)));
+@@ -106,16 +112,18 @@
+     });
+ }
+ 
+-void Connection::internal_connect(const asio::ip::basic_resolver<asio::ip::tcp>::iterator& endpointIterator)
++void Connection::internal_connect(const asio::ip::tcp::resolver::results_type& endpoints)
+ {
+-    m_socket.async_connect(*endpointIterator, [capture0 = asConnection()](auto&& PH1) {
+-        capture0->onConnect(std::forward<decltype(PH1)>(PH1));
++    auto endpoint = *endpoints.begin();
++
++    m_socket.async_connect(endpoint, [capture0 = asConnection()](auto&& ec) {
++        capture0->onConnect(std::forward<decltype(ec)>(ec));
+     });
+ 
+     m_readTimer.cancel();
+-    m_readTimer.expires_from_now(asio::chrono::seconds(static_cast<uint32_t>(READ_TIMEOUT)));
+-    m_readTimer.async_wait([capture0 = asConnection()](auto&& PH1) {
+-        capture0->onTimeout(std::forward<decltype(PH1)>(PH1));
++    m_readTimer.expires_after(asio::chrono::seconds(static_cast<uint32_t>(READ_TIMEOUT)));
++    m_readTimer.async_wait([capture0 = asConnection()](auto&& ec) {
++        capture0->onTimeout(std::forward<decltype(ec)>(ec));
+     });
+ }
+ 
+@@ -133,7 +141,7 @@
+             m_outputStream = std::make_shared<asio::streambuf>();
+ 
+         m_delayedWriteTimer.cancel();
+-        m_delayedWriteTimer.expires_from_now(asio::chrono::milliseconds(0));
++        m_delayedWriteTimer.expires_after(asio::chrono::milliseconds(0));
+         m_delayedWriteTimer.async_wait([capture0 = asConnection()](auto&& PH1) {
+             capture0->onCanWrite(std::forward<decltype(PH1)>(PH1));
+         });
+@@ -159,7 +167,7 @@
+     });
+ 
+     m_writeTimer.cancel();
+-    m_writeTimer.expires_from_now(asio::chrono::seconds(static_cast<uint32_t>(WRITE_TIMEOUT)));
++    m_writeTimer.expires_after(asio::chrono::seconds(static_cast<uint32_t>(WRITE_TIMEOUT)));
+     m_writeTimer.async_wait([capture0 = asConnection()](auto&& PH1) {
+         capture0->onTimeout(std::forward<decltype(PH1)>(PH1));
+     });
+@@ -179,7 +187,7 @@
+     });
+ 
+     m_readTimer.cancel();
+-    m_readTimer.expires_from_now(asio::chrono::seconds(static_cast<uint32_t>(READ_TIMEOUT)));
++    m_readTimer.expires_after(asio::chrono::seconds(static_cast<uint32_t>(READ_TIMEOUT)));
+     m_readTimer.async_wait([capture0 = asConnection()](auto&& PH1) {
+         capture0->onTimeout(std::forward<decltype(PH1)>(PH1));
+     });
+@@ -200,7 +208,7 @@
+     });
+ 
+     m_readTimer.cancel();
+-    m_readTimer.expires_from_now(asio::chrono::seconds(static_cast<uint32_t>(READ_TIMEOUT)));
++    m_readTimer.expires_after(asio::chrono::seconds(static_cast<uint32_t>(READ_TIMEOUT)));
+     m_readTimer.async_wait([capture0 = asConnection()](auto&& PH1) {
+         capture0->onTimeout(std::forward<decltype(PH1)>(PH1));
+     });
+@@ -219,14 +227,13 @@
+     });
+ 
+     m_readTimer.cancel();
+-    m_readTimer.expires_from_now(asio::chrono::seconds(static_cast<uint32_t>(READ_TIMEOUT)));
++    m_readTimer.expires_after(asio::chrono::seconds(static_cast<uint32_t>(READ_TIMEOUT)));
+     m_readTimer.async_wait([capture0 = asConnection()](auto&& PH1) {
+         capture0->onTimeout(std::forward<decltype(PH1)>(PH1));
+     });
+ }
+ 
+-void Connection::onResolve(const std::error_code& error, const asio::ip::basic_resolver<asio::ip::tcp>::iterator&
+-                           endpointIterator)
++void Connection::onResolve(const std::error_code& error, const asio::ip::tcp::resolver::results_type& endpoints)
+ {
+     m_readTimer.cancel();
+ 
+@@ -234,7 +241,7 @@
+         return;
+ 
+     if (!error)
+-        internal_connect(endpointIterator);
++        internal_connect(endpoints);
+     else
+         handleError(error);
+ }
+@@ -300,8 +307,13 @@
+     if (m_connected) {
+         if (!error) {
+             if (m_recvCallback) {
+-                const auto* header = asio::buffer_cast<const char*>(m_inputStream.data());
+-                m_recvCallback((uint8_t*)header, recvSize);
++                const auto* header = static_cast<const char*>(
++                    asio::buffer(
++                        m_inputStream.data()
++                    ).data()
++                );
++
++                m_recvCallback(reinterpret_cast<uint8_t*>(const_cast<char*>(header)), recvSize);
+             }
+         } else
+             handleError(error);
+@@ -336,10 +348,10 @@
+     std::error_code error;
+     const asio::ip::tcp::endpoint ip = m_socket.remote_endpoint(error);
+     if (!error)
+-        return asio::detail::socket_ops::host_to_network_long(ip.address().to_v4().to_ulong());
++        return asio::detail::socket_ops::host_to_network_long(ip.address().to_v4().to_uint());
+ 
+     g_logger.error("Getting remote ip");
+     return 0;
+ }
+ 
+-#endif
+\ Brak znaku nowej linii na końcu pliku
++#endif
+--- a/src/framework/net/connection.h	2026-01-13 20:40:44.000000000 +0100
++++ b/src/framework/net/connection.h	2026-03-19 22:01:24.163140142 +0100
+@@ -65,9 +65,9 @@
+     ConnectionPtr asConnection() { return static_self_cast<Connection>(); }
+ 
+ protected:
+-    void internal_connect(const asio::ip::basic_resolver<asio::ip::tcp>::iterator& endpointIterator);
++    void internal_connect(const asio::ip::tcp::resolver::results_type& endpoints);
+     void internal_write();
+-    void onResolve(const std::error_code& error, const asio::ip::tcp::resolver::iterator& endpointIterator);
++    void onResolve(const std::error_code& error, const asio::ip::tcp::resolver::results_type& endpoints);
+     void onConnect(const std::error_code& error);
+     void onCanWrite(const std::error_code& error);
+     void onWrite(const std::error_code& error, size_t writeSize, const std::shared_ptr<asio::streambuf>&
+--- a/src/framework/net/protocol.cpp	2026-01-13 20:40:44.000000000 +0100
++++ b/src/framework/net/protocol.cpp	2026-03-19 22:29:58.829189129 +0100
+@@ -35,7 +35,7 @@
+ #include <framework/net/packet_player.h>
+ #include <framework/net/packet_recorder.h>
+ 
+-extern asio::io_service g_ioService;
++extern asio::io_context g_ioContext;
+ 
+ Protocol::Protocol() :m_inputMessage(std::make_shared<InputMessage>()) {
+     inflateInit2(&m_zstream, -15);
+@@ -391,7 +391,7 @@
+     if (m_disconnected)
+         return;
+     auto self(asProtocol());
+-    post(g_ioService, [&, packet] {
++    post(g_ioContext, [&, packet] {
+         if (m_disconnected)
+             return;
+         m_inputMessage->reset();
+@@ -418,7 +418,7 @@
+         return;
+     auto self(asProtocol());
+ #ifndef __EMSCRIPTEN__
+-    post(g_ioService, [&, ec] {
++    post(g_ioContext, [&, ec] {
+         if (m_disconnected)
+             return;
+         m_disconnected = true;
+@@ -433,7 +433,7 @@
+         return;
+     auto self(asProtocol());
+ #ifndef __EMSCRIPTEN__
+-    post(g_ioService, [&, packet] {
++    post(g_ioContext, [&, packet] {
+         if (m_disconnected)
+             return;
+         m_inputMessage->reset();
+--- a/src/framework/net/protocolhttp.cpp	2026-01-13 20:40:44.000000000 +0100
++++ b/src/framework/net/protocolhttp.cpp	2026-03-19 22:09:03.571153267 +0100
+@@ -235,7 +235,6 @@
+ void HttpSession::start()
+ {
+     instance_uri = parseURI(m_url);
+-    const asio::ip::tcp::resolver::query query_resolver(instance_uri.domain, instance_uri.port);
+ 
+     m_timer.expires_after(std::chrono::seconds(m_timeout));
+     m_timer.async_wait([sft = shared_from_this()](const std::error_code& ec) { sft->onTimeout(ec); });
+@@ -275,51 +274,52 @@
+         m_request.append(m_result->postData);
+     }
+ 
+-    m_resolver.async_resolve(instance_uri.domain, instance_uri.port, [sft = shared_from_this()](
+-        const std::error_code& ec, asio::ip::tcp::resolver::iterator iterator) {
+-        sft->on_resolve(ec, std::move(iterator));
+-    });
++    m_resolver.async_resolve(
++        instance_uri.domain,
++        instance_uri.port,
++        [sft = shared_from_this()](
++            const std::error_code& ec,
++            asio::ip::tcp::resolver::results_type results
++        ) {
++            sft->on_resolve(ec, std::move(results));
++        }
++    );
+ }
+ 
+-void HttpSession::on_resolve(const std::error_code& ec, asio::ip::tcp::resolver::iterator iterator)
++void HttpSession::on_resolve(const std::error_code& ec, asio::ip::tcp::resolver::results_type results)
+ {
+     if (ec) {
+         onError("HttpSession unable to resolve " + m_url + ": " + ec.message());
+         return;
+     }
+ 
+-    std::error_code _ec;
+-
+     // Try to find IPv4 addresses first
+-    asio::ip::tcp::resolver::iterator end;
+-    asio::ip::tcp::resolver::iterator ipv4_it = end;
+-    auto current = iterator;
+-
+-    while (current != end) {
+-        if (!current->endpoint().address().is_v6()) {
+-            ipv4_it = current;
++    auto endpoint_it = results.begin();
++    for (auto it = results.begin(); it != results.end(); ++it) {
++        if (it->endpoint().address().is_v4()) {
++            endpoint_it = it;
+             break;
+         }
+-        ++current;
+     }
+ 
+-    // If no IPv4 found, use the original iterator (IPv6)
+-    const auto& endpoint_to_use = (ipv4_it != end) ? ipv4_it : iterator;
+-
+     g_logger.debug("Attempting connection to: {}:{}", instance_uri.domain, instance_uri.port);
+ 
+     if (instance_uri.port == "443") {
+         // For HTTPS, use the SSL stream's underlying socket
+-        m_ssl.lowest_layer().async_connect(*endpoint_to_use, [sft = shared_from_this()](
+-            const std::error_code& ec) {
+-            sft->on_connect(ec);
+-        });
++        m_ssl.lowest_layer().async_connect(
++            endpoint_it->endpoint(),
++            [sft = shared_from_this()](const std::error_code& ec) {
++                sft->on_connect(ec);
++            }
++        );
+     } else {
+         // For HTTP, use the regular socket
+-        m_socket.async_connect(*endpoint_to_use, [sft = shared_from_this()](
+-            const std::error_code& ec) {
+-            sft->on_connect(ec);
+-        });
++        m_socket.async_connect(
++            endpoint_it->endpoint(),
++            [sft = shared_from_this()](const std::error_code& ec) {
++                sft->on_connect(ec);
++            }
++        );
+     }
+ }
+ 
+@@ -587,7 +587,6 @@
+ void WebsocketSession::start()
+ {
+     instance_uri = parseURI(m_url);
+-    const asio::ip::tcp::resolver::query query_resolver(instance_uri.domain, instance_uri.port);
+ 
+     m_request.append("GET " + instance_uri.query + " HTTP/1.1\r\n");
+     m_request.append("Host: " + instance_uri.domain + ":" + instance_uri.port + "\r\n");
+@@ -598,14 +597,18 @@
+     m_request.append("\r\n");
+ 
+     m_resolver.async_resolve(
+-        query_resolver,
++        instance_uri.domain,
++        instance_uri.port,
+         [sft = shared_from_this()](
+-        const std::error_code& ec, asio::ip::tcp::resolver::iterator iterator) {
+-        sft->on_resolve(ec, std::move(iterator));
+-    });
++            const std::error_code& ec,
++            asio::ip::tcp::resolver::results_type results
++        ) {
++            sft->on_resolve(ec, std::move(results));
++        }
++    );
+ }
+ 
+-void WebsocketSession::on_resolve(const std::error_code& ec, asio::ip::tcp::resolver::iterator iterator)
++void WebsocketSession::on_resolve(const std::error_code& ec, asio::ip::tcp::resolver::results_type results)
+ {
+     if (ec) {
+         onError("WebsocketSession unable to resolve " + m_url + ": " + ec.message());
+@@ -614,9 +617,9 @@
+ 
+     std::error_code _ec;
+     if (instance_uri.port == "443") {
+-        while (iterator != asio::ip::tcp::resolver::iterator()) {
++        for (auto it = results.begin(); it != results.end(); ++it) {
+             m_ssl.lowest_layer().close();
+-            m_ssl.lowest_layer().connect(*iterator++, _ec);
++            m_ssl.lowest_layer().connect(*it, _ec);
+             if (!_ec) {
+                 const std::error_code __ec;
+                 on_connect(__ec);
+@@ -624,9 +627,9 @@
+             }
+         }
+     } else {
+-        while (iterator != asio::ip::tcp::resolver::iterator()) {
++        for (auto it = results.begin(); it != results.end(); ++it) {
+             m_socket.close();
+-            m_socket.connect(*iterator++, _ec);
++            m_socket.connect(*it, _ec);
+             if (!_ec) {
+                 const std::error_code __ec;
+                 on_connect(__ec);
+@@ -1141,4 +1144,4 @@
+             }
+         }
+     }
+-}
+\ Brak znaku nowej linii na końcu pliku
++}
+--- a/src/framework/net/protocolhttp.h	2026-01-13 20:40:44.000000000 +0100
++++ b/src/framework/net/protocolhttp.h	2026-03-19 21:52:54.899125592 +0100
+@@ -55,7 +55,7 @@
+ {
+ public:
+ 
+-    HttpSession(asio::io_service& service, std::string url, std::string agent,
++    HttpSession(asio::io_context& service, std::string url, std::string agent,
+                 const bool& enable_time_out_on_read_write,
+                 const std::unordered_map<std::string, std::string>& custom_header,
+                 const int timeout, const bool isJson, const bool checkContentLength, HttpResult_ptr result, HttpResult_cb callback) :
+@@ -89,7 +89,7 @@
+     void close();
+ 
+ private:
+-    asio::io_service& m_service;
++    asio::io_context& m_service;
+     std::string m_url;
+     std::string m_agent;
+     bool m_enable_time_out_on_read_write;
+@@ -113,7 +113,7 @@
+     int sum_bytes_speed_response = 0;
+     ticks_t m_last_progress_update = stdext::millis();
+ 
+-    void on_resolve(const std::error_code& ec, asio::ip::tcp::resolver::iterator iterator);
++    void on_resolve(const std::error_code& ec, asio::ip::tcp::resolver::results_type results);
+     void on_connect(const std::error_code& ec);
+ 
+     void on_request_sent(const std::error_code& ec, size_t bytes_transferred);
+@@ -133,7 +133,7 @@
+ {
+ public:
+ 
+-    WebsocketSession(asio::io_service& service, std::string url, std::string agent,
++    WebsocketSession(asio::io_context& service, std::string url, std::string agent,
+                      const bool& enable_time_out_on_read_write, const int timeout, HttpResult_ptr result, WebsocketSession_cb callback) :
+         m_service(service),
+         m_url(std::move(url)),
+@@ -155,7 +155,7 @@
+     void close();
+ 
+ private:
+-    asio::io_service& m_service;
++    asio::io_context& m_service;
+     std::string m_url;
+     std::string m_agent;
+     std::string m_read_buffer;
+@@ -179,7 +179,7 @@
+     std::string m_request;
+     asio::streambuf m_response;
+ 
+-    void on_resolve(const std::error_code& ec, asio::ip::tcp::resolver::iterator iterator);
++    void on_resolve(const std::error_code& ec, asio::ip::tcp::resolver::results_type results);
+     void on_connect(const std::error_code& ec);
+     void on_request_sent(const std::error_code& ec, size_t bytes_transferred);
+ 
+--- a/src/framework/net/server.cpp	2026-01-13 20:40:44.000000000 +0100
++++ b/src/framework/net/server.cpp	2026-03-19 22:29:58.829189129 +0100
+@@ -25,10 +25,10 @@
+ #include "connection.h"
+ #include "server.h"
+ 
+-extern asio::io_service g_ioService;
++extern asio::io_context g_ioContext;
+ 
+ Server::Server(const int port)
+-    : m_acceptor(g_ioService, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port))
++    : m_acceptor(g_ioContext, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port))
+ {
+ }
+ 
+--- a/src/framework/pch.h	2026-01-13 20:40:44.000000000 +0100
++++ b/src/framework/pch.h	2026-03-19 21:18:20.867066338 +0100
+@@ -83,7 +83,7 @@
+ #include <fmt/ranges.h>
+ 
+ // Asio (standalone)
+-#include <asio/io_service.hpp>
++#include <asio/io_context.hpp>
+ #include <asio/ip/tcp.hpp>
+ #include <asio/read.hpp>
+ #include <asio/read_until.hpp>
+--- a/src/framework/proxy/proxy_client.cpp	2026-01-13 20:40:44.000000000 +0100
++++ b/src/framework/proxy/proxy_client.cpp	2026-03-19 21:57:14.843133019 +0100
+@@ -56,7 +56,7 @@
+         g_proxies.erase(self);
+         disconnect();
+         std::error_code ec;
+-        m_timer.cancel(ec);
++        m_timer.cancel();
+     });
+ }
+ 
+@@ -94,7 +94,7 @@
+             ping();
+         }
+     }
+-    m_timer.expires_from_now(std::chrono::milliseconds(CHECK_INTERVAL));
++    m_timer.expires_after(std::chrono::milliseconds(CHECK_INTERVAL));
+     m_timer.async_wait([capture0 = shared_from_this()](auto&& PH1) {
+         capture0->check(std::forward<decltype(PH1)>(PH1));
+     });
+@@ -127,7 +127,7 @@
+             }
+             endpoint = asio::ip::tcp::endpoint(address, self->m_port);
+         } else {
+-            endpoint = asio::ip::tcp::endpoint(*results);
++            if (!results.empty()) endpoint = results.begin()->endpoint();
+             endpoint.port(self->m_port);
+         }
+         self->m_resolvedIp = endpoint.address().to_string();
+@@ -353,7 +353,7 @@
+             std::error_code ecc;
+             m_socket.shutdown(asio::ip::tcp::socket::shutdown_both, ecc);
+             m_socket.close(ecc);
+-            m_timer.cancel(ecc);
++            m_timer.cancel();
+         } else if (m_disconnectCallback) {
+             m_disconnectCallback(ec);
+         }
+@@ -379,7 +379,7 @@
+ 
+     selectProxies();
+ 
+-    m_timer.expires_from_now(std::chrono::milliseconds(CHECK_INTERVAL));
++    m_timer.expires_after(std::chrono::milliseconds(CHECK_INTERVAL));
+     m_timer.async_wait([capture0 = shared_from_this()](auto&& PH1) {
+         capture0->check(std::forward<decltype(PH1)>(PH1));
+     });
+@@ -582,4 +582,4 @@
+             capture0->onSent(std::forward<decltype(PH1)>(PH1), std::forward<decltype(PH2)>(PH2));
+         });
+     }
+-}
+\ Brak znaku nowej linii na końcu pliku
++}
+--- a/src/framework/stdext/net.cpp	2026-01-13 20:40:44.000000000 +0100
++++ b/src/framework/stdext/net.cpp	2026-03-19 21:58:10.667134614 +0100
+@@ -33,8 +33,8 @@
+ 
+     uint32_t string_to_ip(const std::string_view string)
+     {
+-        const asio::ip::address_v4 address_v4 = asio::ip::address_v4::from_string(string.data());
+-        return asio::detail::socket_ops::host_to_network_long(address_v4.to_ulong());
++        const asio::ip::address_v4 address_v4 = asio::ip::make_address_v4(string);
++        return asio::detail::socket_ops::host_to_network_long(address_v4.to_uint());
+     }
+ 
+     std::vector<uint32_t > listSubnetAddresses(const uint32_t address, const uint8_t mask)
+@@ -52,4 +52,4 @@
+ 
+         return list;
+     }
+-}
+\ Brak znaku nowej linii na końcu pliku
++}
