@@ -1,0 +1,493 @@
+diff '--color=auto' -Naur a/cmake/modules/BaseConfig.cmake b/cmake/modules/BaseConfig.cmake
+--- a/cmake/modules/BaseConfig.cmake	2026-02-18 00:58:05.000000000 +0100
++++ b/cmake/modules/BaseConfig.cmake	2026-03-09 00:43:26.160595341 +0100
+@@ -33,72 +33,162 @@
+ # *****************************************************************************
+ # Packages / Libs
+ # *****************************************************************************
+-find_package(
+-    CURL
+-    CONFIG
+-    REQUIRED
+-)
+ find_package(OpenSSL REQUIRED)
+ find_package(LuaJIT REQUIRED)
+ find_package(MySQL REQUIRED)
+ find_package(Protobuf REQUIRED)
+ find_package(Threads REQUIRED)
+ find_package(ZLIB REQUIRED)
+-find_package(
+-    absl
+-    CONFIG
+-    REQUIRED
+-)
+-find_package(
+-    asio
+-    CONFIG
+-    REQUIRED
+-)
+-find_package(
+-    eventpp
+-    CONFIG
+-    REQUIRED
+-)
+-find_package(
+-    magic_enum
+-    CONFIG
+-    REQUIRED
+-)
+-if(FEATURE_METRICS)
++find_package(mio REQUIRED)
++find_package(spdlog REQUIRED)
++if(DEFINED VCPKG_TARGET_TRIPLET)
++    find_package(
++        CURL
++        CONFIG
++        REQUIRED
++    )
++    find_package(
++        absl
++        CONFIG
++        REQUIRED
++    )
++    find_package(
++        asio
++        CONFIG
++        REQUIRED
++    )
++    find_package(
++        eventpp
++        CONFIG
++        REQUIRED
++    )
++    find_package(
++        magic_enum
++        CONFIG
++        REQUIRED
++    )
++    find_package(
++        pugixml
++        CONFIG
++        REQUIRED
++    )
++    find_package(
++        unofficial-argon2
++        CONFIG
++        REQUIRED
++    )
+     find_package(
+-        opentelemetry-cpp
++        unofficial-libmariadb
+         CONFIG
+         REQUIRED
+     )
++    if(FEATURE_METRICS)
++        find_package(
++            opentelemetry-cpp
++            CONFIG
++            REQUIRED
++        )
++        find_package(
++            prometheus-cpp
++            CONFIG
++            REQUIRED
++        )
++    endif()
+     find_package(
+-        prometheus-cpp
++        nlohmann_json
+         CONFIG
+         REQUIRED
+     )
++else()
++    find_package(
++        CURL
++        REQUIRED
++    )
++    find_package(
++        absl
++        REQUIRED
++    )
++    pkg_check_modules(
++        ASIO
++        REQUIRED
++        asio
++    )
++    add_library(
++        asio::asio
++        INTERFACE
++        IMPORTED
++    )
++    set_target_properties(
++        asio::asio
++        PROPERTIES
++        INTERFACE_INCLUDE_DIRECTORIES
++        "${ASIO_INCLUDE_DIRS}"
++    )
++    find_package(
++        eventpp
++        REQUIRED
++    )
++    find_package(
++        magic_enum
++        REQUIRED
++    )
++    find_package(
++        pugixml
++        REQUIRED
++    )
++    pkg_check_modules(
++        ARGON2
++        REQUIRED
++        libargon2
++    )
++    if(NOT TARGET unofficial::argon2::libargon2)
++        add_library(
++            unofficial::argon2::libargon2
++            INTERFACE
++            IMPORTED
++        )
++        set_target_properties(
++            unofficial::argon2::libargon2
++            PROPERTIES
++            INTERFACE_INCLUDE_DIRECTORIES "${ARGON2_INCLUDE_DIRS}"
++            INTERFACE_LINK_LIBRARIES "${ARGON2_LIBRARIES}"
++            INTERFACE_COMPILE_OPTIONS "${ARGON2_CFLAGS_OTHER}"
++        )
++    endif()
++    pkg_check_modules(
++        MARIADB
++        REQUIRED
++        libmariadb
++    )
++    if(NOT TARGET unofficial::libmariadb)
++        add_library(
++            unofficial::libmariadb
++            INTERFACE
++            IMPORTED
++        )
++        set_target_properties(
++            unofficial::libmariadb
++            PROPERTIES
++            INTERFACE_INCLUDE_DIRECTORIES "${MARIADB_INCLUDE_DIRS}"
++            INTERFACE_LINK_LIBRARIES "${MARIADB_LIBRARIES}"
++            INTERFACE_COMPILE_OPTIONS "${MARIADB_CFLAGS_OTHER}"
++        )
++    endif()
++    if(FEATURE_METRICS)
++        find_package(
++            opentelemetry-cpp
++            REQUIRED
++        )
++        find_package(
++            prometheus-cpp
++            REQUIRED
++        )
++    endif()
++        find_package(
++        nlohmann_json
++        REQUIRED
++    )
+ endif()
+-find_package(mio REQUIRED)
+-find_package(
+-    pugixml
+-    CONFIG
+-    REQUIRED
+-)
+-find_package(spdlog REQUIRED)
+-find_package(
+-    unofficial-argon2
+-    CONFIG
+-    REQUIRED
+-)
+-find_package(
+-    unofficial-libmariadb
+-    CONFIG
+-    REQUIRED
+-)
+-find_package(
+-    nlohmann_json
+-    CONFIG
+-    REQUIRED
+-)
+-
+ find_path(BOOST_DI_INCLUDE_DIRS "boost/di.hpp")
+ 
+ # *****************************************************************************
+diff '--color=auto' -Naur a/cmake/modules/CanaryLib.cmake b/cmake/modules/CanaryLib.cmake
+--- a/cmake/modules/CanaryLib.cmake	2026-02-18 00:58:05.000000000 +0100
++++ b/cmake/modules/CanaryLib.cmake	2026-03-09 00:26:35.308612603 +0100
+@@ -104,6 +104,7 @@
+                absl::log
+                absl::base
+                absl::bits
++               absl::log_internal_check_op
+                asio::asio
+                eventpp::eventpp
+                fmt::fmt
+diff '--color=auto' -Naur a/src/database/database.cpp b/src/database/database.cpp
+--- a/src/database/database.cpp	2026-02-18 00:58:05.000000000 +0100
++++ b/src/database/database.cpp	2026-03-09 08:32:04.392115177 +0100
+@@ -40,16 +40,17 @@
+ 		g_logger().warn("MySQL host, user, password, database or port not provided");
+ 	}
+ 
+-	// automatic reconnect
+-	bool reconnect = true;
+-	mysql_options(handle, MYSQL_OPT_RECONNECT, &reconnect);
+-
+ 	// Remove ssl verification
+-	bool ssl_enabled = false;
+-	mysql_options(handle, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, &ssl_enabled);
+-
+-	// connects to database
+-	if (!mysql_real_connect(handle, host->c_str(), user->c_str(), password->c_str(), database->c_str(), port, sock->c_str(), 0)) {
++	unsigned long flags = 0;
++	if (!mysql_real_connect(handle,
++		host->c_str(),
++		user->c_str(),
++		password->c_str(),
++		database->c_str(),
++		port,
++		sock->empty() ? nullptr : sock->c_str(),
++		flags)
++	) {
+ 		g_logger().error("MySQL Error Message: {}", mysql_error(handle));
+ 		return false;
+ 	}
+@@ -58,6 +59,7 @@
+ 	if (result) {
+ 		maxPacketSize = result->getNumber<uint64_t>("Value");
+ 	}
++
+ 	return true;
+ }
+ 
+diff '--color=auto' -Naur a/src/server/network/connection/connection.cpp b/src/server/network/connection/connection.cpp
+--- a/src/server/network/connection/connection.cpp	2026-02-18 00:58:05.000000000 +0100
++++ b/src/server/network/connection/connection.cpp	2026-03-09 00:29:40.612609439 +0100
+@@ -23,7 +23,7 @@
+ 	return inject<ConnectionManager>();
+ }
+ 
+-Connection_ptr ConnectionManager::createConnection(asio::io_service &io_service, const ConstServicePort_ptr &servicePort) {
++Connection_ptr ConnectionManager::createConnection(asio::io_context &io_service, const ConstServicePort_ptr &servicePort) {
+ 	auto connection = std::make_shared<Connection>(io_service, servicePort);
+ 	connections.emplace(connection);
+ 	return connection;
+@@ -51,7 +51,7 @@
+ 	connections.clear();
+ }
+ 
+-Connection::Connection(asio::io_service &initIoService, ConstServicePort_ptr initservicePort) :
++Connection::Connection(asio::io_context &initIoService, ConstServicePort_ptr initservicePort) :
+ 	readTimer(initIoService),
+ 	writeTimer(initIoService),
+ 	service_port(std::move(initservicePort)),
+@@ -112,7 +112,7 @@
+ }
+ 
+ void Connection::acceptInternal(bool toggleParseHeader) {
+-	readTimer.expires_from_now(std::chrono::seconds(CONNECTION_READ_TIMEOUT));
++	readTimer.expires_after(std::chrono::seconds(CONNECTION_READ_TIMEOUT));
+ 	readTimer.async_wait([self = std::weak_ptr<Connection>(shared_from_this())](const std::error_code &error) { Connection::handleTimeout(self, error); });
+ 
+ 	try {
+@@ -155,7 +155,7 @@
+ 			if (remainder > 0) {
+ 				connectionState = CONNECTION_STATE_READINGS;
+ 				try {
+-					readTimer.expires_from_now(std::chrono::seconds(CONNECTION_READ_TIMEOUT));
++					readTimer.expires_after(std::chrono::seconds(CONNECTION_READ_TIMEOUT));
+ 					readTimer.async_wait([self = std::weak_ptr<Connection>(shared_from_this())](const std::error_code &error) { Connection::handleTimeout(self, error); });
+ 
+ 					// Read the remainder of proxy identification
+@@ -220,7 +220,7 @@
+ 	}
+ 
+ 	try {
+-		readTimer.expires_from_now(std::chrono::seconds(CONNECTION_READ_TIMEOUT));
++		readTimer.expires_after(std::chrono::seconds(CONNECTION_READ_TIMEOUT));
+ 		readTimer.async_wait([self = std::weak_ptr<Connection>(shared_from_this())](const std::error_code &error) { Connection::handleTimeout(self, error); });
+ 
+ 		// Read packet content
+@@ -287,7 +287,7 @@
+ 	}
+ 
+ 	try {
+-		readTimer.expires_from_now(std::chrono::seconds(CONNECTION_READ_TIMEOUT));
++		readTimer.expires_after(std::chrono::seconds(CONNECTION_READ_TIMEOUT));
+ 		readTimer.async_wait([self = std::weak_ptr<Connection>(shared_from_this())](const std::error_code &error) { Connection::handleTimeout(self, error); });
+ 
+ 		if (!skipReadingNextPacket) {
+@@ -301,7 +301,7 @@
+ }
+ 
+ void Connection::resumeWork() {
+-	readTimer.expires_from_now(std::chrono::seconds(CONNECTION_READ_TIMEOUT));
++	readTimer.expires_after(std::chrono::seconds(CONNECTION_READ_TIMEOUT));
+ 	readTimer.async_wait([self = std::weak_ptr<Connection>(shared_from_this())](const std::error_code &error) { Connection::handleTimeout(self, error); });
+ 
+ 	try {
+@@ -370,7 +370,7 @@
+ }
+ 
+ void Connection::internalSend(const OutputMessage_ptr &outputMessage) {
+-	writeTimer.expires_from_now(std::chrono::seconds(CONNECTION_WRITE_TIMEOUT));
++	writeTimer.expires_after(std::chrono::seconds(CONNECTION_WRITE_TIMEOUT));
+ 	writeTimer.async_wait([self = std::weak_ptr<Connection>(shared_from_this())](const std::error_code &error) { Connection::handleTimeout(self, error); });
+ 
+ 	try {
+diff '--color=auto' -Naur a/src/server/network/connection/connection.hpp b/src/server/network/connection/connection.hpp
+--- a/src/server/network/connection/connection.hpp	2026-02-18 00:58:05.000000000 +0100
++++ b/src/server/network/connection/connection.hpp	2026-03-09 00:29:40.612609439 +0100
+@@ -38,7 +38,7 @@
+ 
+ 	static ConnectionManager &getInstance();
+ 
+-	Connection_ptr createConnection(asio::io_service &io_service, const ConstServicePort_ptr &servicePort);
++	Connection_ptr createConnection(asio::io_context &io_service, const ConstServicePort_ptr &servicePort);
+ 	void releaseConnection(const Connection_ptr &connection);
+ 	void closeAll();
+ 
+@@ -49,7 +49,7 @@
+ class Connection : public std::enable_shared_from_this<Connection> {
+ public:
+ 	// Constructor
+-	Connection(asio::io_service &initIoService, ConstServicePort_ptr initservicePort);
++	Connection(asio::io_context &initIoService, ConstServicePort_ptr initservicePort);
+ 	// Constructor end
+ 
+ 	// Destructor
+diff '--color=auto' -Naur a/src/server/server.cpp b/src/server/server.cpp
+--- a/src/server/server.cpp	2026-02-18 00:58:05.000000000 +0100
++++ b/src/server/server.cpp	2026-03-09 00:32:19.325606728 +0100
+@@ -46,7 +46,7 @@
+ 
+ 	for (auto &servicePortIt : acceptors) {
+ 		try {
+-			io_service.post([servicePort = servicePortIt.second] { servicePort->onStopServer(); });
++			asio::post(io_service, [servicePort = servicePortIt.second] { servicePort->onStopServer(); });
+ 		} catch (const std::system_error &e) {
+ 			g_logger().warn("[ServiceManager::stop] - Network error: {}", e.what());
+ 		}
+@@ -54,7 +54,7 @@
+ 
+ 	acceptors.clear();
+ 
+-	death_timer.expires_from_now(std::chrono::seconds(3));
++	death_timer.expires_after(std::chrono::seconds(3));
+ 	death_timer.async_wait([this](const std::error_code &err) {
+ 		die();
+ 	});
+@@ -153,7 +153,7 @@
+ 
+ 	try {
+ 		if (g_configManager().getBoolean(BIND_ONLY_GLOBAL_ADDRESS)) {
+-			acceptor = std::make_unique<asio::ip::tcp::acceptor>(io_service, asio::ip::tcp::endpoint(asio::ip::address(asio::ip::address_v4::from_string(g_configManager().getString(IP))), serverPort));
++			acceptor = std::make_unique<asio::ip::tcp::acceptor>(io_service, asio::ip::tcp::endpoint(asio::ip::address(asio::ip::make_address(g_configManager().getString(IP))), serverPort));
+ 		} else {
+ 			acceptor = std::make_unique<asio::ip::tcp::acceptor>(io_service, asio::ip::tcp::endpoint(asio::ip::address(asio::ip::address_v4(INADDR_ANY)), serverPort));
+ 		}
+diff '--color=auto' -Naur a/src/server/server.hpp b/src/server/server.hpp
+--- a/src/server/server.hpp	2026-02-18 00:58:05.000000000 +0100
++++ b/src/server/server.hpp	2026-03-09 00:29:40.612609439 +0100
+@@ -49,7 +49,7 @@
+ 
+ class ServicePort : public std::enable_shared_from_this<ServicePort> {
+ public:
+-	explicit ServicePort(asio::io_service &init_io_service) :
++	explicit ServicePort(asio::io_context &init_io_service) :
+ 		io_service(init_io_service) { }
+ 	~ServicePort();
+ 
+@@ -72,7 +72,7 @@
+ private:
+ 	void accept();
+ 
+-	asio::io_service &io_service;
++	asio::io_context &io_service;
+ 	std::unique_ptr<asio::ip::tcp::acceptor> acceptor;
+ 	std::vector<Service_ptr> services;
+ 
+@@ -104,7 +104,7 @@
+ 
+ 	phmap::flat_hash_map<uint16_t, ServicePort_ptr> acceptors;
+ 
+-	asio::io_service io_service;
++	asio::io_context io_service;
+ 	Signals signals { io_service };
+ 	asio::high_resolution_timer death_timer { io_service };
+ 	bool running = false;
+diff '--color=auto' -Naur a/src/server/signals.cpp b/src/server/signals.cpp
+--- a/src/server/signals.cpp	2026-02-18 00:58:05.000000000 +0100
++++ b/src/server/signals.cpp	2026-03-09 00:29:40.611609439 +0100
+@@ -21,7 +21,7 @@
+ #include "lua/scripts/lua_environment.hpp"
+ #include "lib/di/container.hpp"
+ 
+-Signals::Signals(asio::io_service &service) :
++Signals::Signals(asio::io_context &service) :
+ 	set(service) {
+ 	set.add(SIGINT);
+ 	set.add(SIGTERM);
+diff '--color=auto' -Naur a/src/server/signals.hpp b/src/server/signals.hpp
+--- a/src/server/signals.hpp	2026-02-18 00:58:05.000000000 +0100
++++ b/src/server/signals.hpp	2026-03-09 00:29:40.611609439 +0100
+@@ -13,7 +13,7 @@
+ 	asio::signal_set set;
+ 
+ public:
+-	explicit Signals(asio::io_service &service);
++	explicit Signals(asio::io_context &service);
+ 
+ private:
+ 	void asyncWait();
+diff '--color=auto' -Naur a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt	2026-02-18 00:58:05.000000000 +0100
++++ b/CMakeLists.txt	2026-03-09 08:50:39.581096133 +0100
+@@ -68,43 +68,6 @@
+     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules
+ )
+ 
+-# Configure build options for compatibility with commodity CPUs
+-if(NOT MSVC)
+-    if(CMAKE_SYSTEM_PROCESSOR
+-       MATCHES
+-       "x86_64|AMD64"
+-    )
+-        set(CMAKE_CXX_FLAGS
+-            "${CMAKE_CXX_FLAGS} -march=x86-64 -mtune=generic -mno-avx -mno-sse4"
+-        )
+-        set(CMAKE_C_FLAGS
+-            "${CMAKE_C_FLAGS} -march=x86-64 -mtune=generic -mno-avx -mno-sse4"
+-        )
+-    elseif(
+-        CMAKE_SYSTEM_PROCESSOR
+-        MATCHES
+-        "arm64|aarch64"
+-    )
+-        # ARM64 specific flags for compatibility
+-        if(APPLE)
+-            set(CMAKE_CXX_FLAGS
+-                "${CMAKE_CXX_FLAGS} -mcpu=apple-a14"
+-            )
+-            set(CMAKE_C_FLAGS
+-                "${CMAKE_C_FLAGS} -mcpu=apple-a14"
+-            )
+-        else()
+-            # Generic ARM64 flags for Linux/other systems
+-            set(CMAKE_CXX_FLAGS
+-                "${CMAKE_CXX_FLAGS} -march=armv8-a -mtune=generic"
+-            )
+-            set(CMAKE_C_FLAGS
+-                "${CMAKE_C_FLAGS} -march=armv8-a -mtune=generic"
+-            )
+-        endif()
+-    endif()
+-endif()
+-
+ # *****************************************************************************
+ # Include cmake tools
+ # *****************************************************************************
