@@ -1,8 +1,21 @@
-diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 593a3f6a2..f6025773c 100644
---- a/src/CMakeLists.txt
-+++ b/src/CMakeLists.txt
-@@ -143,7 +143,12 @@ find_package(ZLIB REQUIRED)
+--- a/src/CMakeLists.txt	2026-01-13 20:40:44.000000000 +0100
++++ b/src/CMakeLists.txt	2026-03-29 01:54:39.869755745 +0100
+@@ -116,6 +116,14 @@
+ # *****************************************************************************
+ # Packages / Libs
+ # *****************************************************************************
++# Before we begin loading packages wholesale, we have to check which package
++# provider is available. Normally, OTClient developers prefer vcpkg.
++# However if that is not available, we can check if PkgConfig is available.
++# PkgConfig is only intended for package maintainers.
++# *****************************************************************************
++if(NOT DEFINED VCPKG_TARGET_TRIPLET)
++  find_package(PkgConfig REQUIRED)
++endif()
+ find_package(OpenSSL QUIET)
+ find_package(PhysFS REQUIRED)
+ find_package(ZLIB REQUIRED)
+@@ -132,7 +140,12 @@
  find_package(httplib CONFIG REQUIRED)
  find_package(fmt CONFIG REQUIRED)
  find_package(utf8cpp REQUIRED)
@@ -16,7 +29,7 @@ index 593a3f6a2..f6025773c 100644
  
  find_path(CPPCODEC_INCLUDE_DIRS "cppcodec/base32_crockford.hpp")
  
-@@ -177,9 +182,30 @@ if(TOGGLE_FRAMEWORK_SOUND)
+@@ -165,9 +178,30 @@
    if(NOT WASM)
      find_package(OpenAL CONFIG REQUIRED)
    endif()
@@ -50,7 +63,7 @@ index 593a3f6a2..f6025773c 100644
  endif()
  if(ANDROID)
    set(LUA_LIBRARY ${LUA_LIBRARY} ${Android_LIBRARIES}/liblua.a)
-@@ -193,7 +219,12 @@ if(ANDROID)
+@@ -181,7 +215,20 @@
  else()
    if(NOT WASM)
      find_package(OpenGL REQUIRED)
@@ -60,25 +73,15 @@ index 593a3f6a2..f6025773c 100644
 +    else()
 +      pkg_check_modules(GLEW REQUIRED IMPORTED_TARGET glew)
 +      add_library(GLEW::GLEW ALIAS PkgConfig::GLEW)
++# *****************************************************************************
++# GLEW_LIBRARY seems to be missing from PkgConfig::GLEW, so
++# we're gonna declare it with the value of GLEW_LIBRARIES to make the rest
++# of the recipe hold it together.
++# *****************************************************************************
++      if(NOT DEFINED GLEW_LIBRARY AND DEFINED GLEW_LIBRARIES)
++        set(GLEW_LIBRARY "${GLEW_LIBRARIES}")
++      endif()
 +    endif()
      find_package(LuaJIT REQUIRED)
    else()
      set(LUA_LIBRARY ${LUA_LIBRARY} ${CMAKE_SOURCE_DIR}/browser/include/lua51/liblua.a)
-@@ -777,7 +808,7 @@ else() # Linux
-           $<$<BOOL:${TOGGLE_FRAMEWORK_PROTOBUF}>:${Protobuf_INCLUDE_DIRS}>
-           ${GMP_INCLUDE_DIR}
-           ${PHYSFS_INCLUDE_DIR}
--          ${GLEW_INCLUDE_DIR}
-+          GLEW::GLEW
-           ${PARALLEL_HASHMAP_INCLUDE_DIRS}
-           ${NLOHMANN_JSON_INCLUDE_DIR}
-           ${OPENSSL_INCLUDE_DIR}
-@@ -789,7 +820,7 @@ else() # Linux
-           ${PHYSFS_LIBRARY}
-           ${ZLIB_LIBRARY}
-           ${NLOHMANN_JSON_LIBRARY}
--          ${GLEW_LIBRARY}
-+          GLEW::GLEW
-           ${OPENGL_LIBRARIES}
-           ${DirectX_LIBRARY}
-           ${DirectX_LIBRARIES}
